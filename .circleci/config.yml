@@ -1,0 +1,172 @@
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@5.1
+  python: circleci/python@2.1
+
+parameters:
+  python-version:
+    type: string
+    default: "3.11"
+  install-command:
+    type: string
+    default: "pip install -r requirements.txt && pip install -r requirements-dev.txt"
+  lint-command:
+    type: string
+    default: "flake8 . && black --check ."
+  test-command:
+    type: string
+    default: "pytest tests/ --junitxml=test-results/results.xml"
+  cdk-app-path:
+    type: string
+    default: "."
+
+commands:
+  assume-oidc-role:
+    description: "Assume AWS IAM role via OIDC"
+    steps:
+      - aws-cli/setup:
+          role_arn: ${AWS_ROLE_ARN}
+          region: ${AWS_REGION}
+          role_session_name: "circleci-${CIRCLE_BUILD_NUM}"
+
+  install-deps:
+    description: "Install Python dependencies with caching"
+    steps:
+      - restore_cache:
+          keys:
+            - pip-{{ checksum "requirements.txt" }}-{{ checksum "requirements-dev.txt" }}
+            - pip-
+      - run:
+          name: Install dependencies
+          command: << pipeline.parameters.install-command >>
+      - save_cache:
+          key: pip-{{ checksum "requirements.txt" }}-{{ checksum "requirements-dev.txt" }}
+          paths:
+            - ~/.cache/pip
+
+  install-cdk:
+    description: "Install AWS CDK CLI"
+    steps:
+      - run:
+          name: Install AWS CDK
+          command: npm install -g aws-cdk
+
+jobs:
+  lint:
+    docker:
+      - image: cimg/python:<< pipeline.parameters.python-version >>
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Run linting
+          command: << pipeline.parameters.lint-command >>
+
+  test:
+    docker:
+      - image: cimg/python:<< pipeline.parameters.python-version >>
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Run tests
+          command: << pipeline.parameters.test-command >>
+      - store_test_results:
+          path: test-results
+
+  security-scan:
+    docker:
+      - image: cimg/python:<< pipeline.parameters.python-version >>
+    steps:
+      - checkout
+      - install-deps
+      - run:
+          name: Run Bandit security scan
+          command: pip install bandit && bandit -r . -x ./tests,./cdk.out -f json -o bandit-report.json || true
+      - store_artifacts:
+          path: bandit-report.json
+
+  cdk-synth:
+    docker:
+      - image: cimg/python:<< pipeline.parameters.python-version >>-node
+    steps:
+      - checkout
+      - install-deps
+      - install-cdk
+      - assume-oidc-role
+      - run:
+          name: CDK Synth
+          command: cdk synth --all
+      - persist_to_workspace:
+          root: .
+          paths:
+            - cdk.out
+
+  deploy-dev:
+    docker:
+      - image: cimg/python:<< pipeline.parameters.python-version >>-node
+    steps:
+      - checkout
+      - install-deps
+      - install-cdk
+      - attach_workspace:
+          at: .
+      - assume-oidc-role
+      - run:
+          name: Deploy to Dev
+          command: cdk deploy --all --require-approval never --app cdk.out
+
+  deploy-prod:
+    docker:
+      - image: cimg/python:<< pipeline.parameters.python-version >>-node
+    steps:
+      - checkout
+      - install-deps
+      - install-cdk
+      - attach_workspace:
+          at: .
+      - assume-oidc-role
+      - run:
+          name: Deploy to Production
+          command: cdk deploy --all --require-approval never --app cdk.out
+
+workflows:
+  build-and-deploy:
+    jobs:
+      - lint
+      - test
+      - security-scan
+      - cdk-synth:
+          context:
+            - aws-oidc-dev
+          requires:
+            - lint
+            - test
+            - security-scan
+          filters:
+            branches:
+              only: main
+      - deploy-dev:
+          context:
+            - aws-oidc-dev
+          requires:
+            - cdk-synth
+          filters:
+            branches:
+              only: main
+      - approve-prod:
+          type: approval
+          requires:
+            - deploy-dev
+          filters:
+            branches:
+              only: main
+      - deploy-prod:
+          context:
+            - aws-oidc-prod
+          requires:
+            - approve-prod
+          filters:
+            branches:
+              only: main
