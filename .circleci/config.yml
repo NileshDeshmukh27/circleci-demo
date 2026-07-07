@@ -50,7 +50,7 @@ commands:
     steps:
       - run:
           name: Install AWS CDK
-          command: npm install -g aws-cdk
+          command: sudo npm install -g aws-cdk
 
 jobs:
   lint:
