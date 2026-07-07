@@ -97,7 +97,7 @@ jobs:
       - assume-oidc-role
       - run:
           name: CDK Synth
-          command: cdk synth --all
+          command: cdk synth
       - persist_to_workspace:
           root: .
           paths:
@@ -115,7 +115,7 @@ jobs:
       - assume-oidc-role
       - run:
           name: Deploy to Dev
-          command: cdk deploy --all --require-approval never --app cdk.out
+          command: cdk deploy --require-approval never --app cdk.out
 
   deploy-prod:
     docker:
@@ -129,7 +129,7 @@ jobs:
       - assume-oidc-role
       - run:
           name: Deploy to Production
-          command: cdk deploy --all --require-approval never --app cdk.out
+          command: cdk deploy --require-approval never --app cdk.out
 
 workflows:
   build-and-deploy:
