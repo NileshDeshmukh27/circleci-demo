@@ -4,9 +4,13 @@ from stacks.app_stack import AppStack
 
 app = cdk.App()
 
-AppStack(app, "CircleciDemoDevStack", env=cdk.Environment(
-    account=None,  # Uses CDK_DEFAULT_ACCOUNT
-    region=None,   # Uses CDK_DEFAULT_REGION
-))
+AppStack(
+    app,
+    "CircleciDemoDevStack",
+    env=cdk.Environment(
+        account=None,  # Uses CDK_DEFAULT_ACCOUNT
+        region=None,  # Uses CDK_DEFAULT_REGION
+    ),
+)
 
 app.synth()
